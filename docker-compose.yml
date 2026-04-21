@@ -1,0 +1,202 @@
+version: "3.8"
+
+services:
+  # ===========================================================================
+  # Infrastructure
+  # ===========================================================================
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_chatbot}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag_user} -d ${POSTGRES_DB:-rag_chatbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rag_network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - rag_network
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: rag_n8n
+    restart: unless-stopped
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-change_me_in_production}
+      - WEBHOOK_URL=http://n8n:5678/
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - rag_network
+
+  # ===========================================================================
+  # Python Microservices
+  # ===========================================================================
+
+  chat_api:
+    build:
+      context: ./services/chat_api
+      dockerfile: Dockerfile
+    container_name: rag_chat_api
+    restart: unless-stopped
+    environment:
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/chat}
+      - HOST=0.0.0.0
+      - PORT=8000
+    ports:
+      - "${CHAT_API_PORT:-8000}:8000"
+    depends_on:
+      n8n:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - rag_network
+
+  gateway_router:
+    build:
+      context: ./services/gateway_router
+      dockerfile: Dockerfile
+    container_name: rag_gateway_router
+    restart: unless-stopped
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8001
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - rag_network
+
+  embedding_service:
+    build:
+      context: ./services/embedding_service
+      dockerfile: Dockerfile
+    container_name: rag_embedding_service
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
+      - HOST=0.0.0.0
+      - PORT=8002
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - rag_network
+
+  llm_service:
+    build:
+      context: ./services/llm_service
+      dockerfile: Dockerfile
+    container_name: rag_llm_service
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - INFERENCE_BACKEND=${INFERENCE_BACKEND:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - HOST=0.0.0.0
+      - PORT=8003
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8003/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - rag_network
+
+  pricing_api:
+    build:
+      context: ./services/pricing_api
+      dockerfile: Dockerfile
+    container_name: rag_pricing_api
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://rag_user:change_me_in_production@postgres:5432/rag_chatbot}
+      - HOST=0.0.0.0
+      - PORT=8004
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8004/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - rag_network
+
+# ===========================================================================
+# Volumes & Networks
+# ===========================================================================
+
+volumes:
+  postgres_data:
+  ollama_data:
+  n8n_data:
+
+networks:
+  rag_network:
+    driver: bridge
