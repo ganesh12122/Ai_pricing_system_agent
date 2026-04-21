@@ -80,6 +80,7 @@ services:
       retries: 3
     networks:
       - rag_network
+      - aob-network
 
   embedding_service:
     build:
@@ -101,6 +102,7 @@ services:
       retries: 3
     networks:
       - rag_network
+      - aob-network
 
   llm_service:
     build:
@@ -125,6 +127,7 @@ services:
       retries: 3
     networks:
       - rag_network
+      - aob-network
 
   pricing_api:
     build:
@@ -148,6 +151,7 @@ services:
       retries: 3
     networks:
       - rag_network
+      - aob-network
 
 # ===========================================================================
 # Volumes & Networks
