@@ -149,7 +149,7 @@ volumes:
   postgres_data:
 
 networks:
-  aob-network:
-    external: true
   rag_network:
     driver: bridge
+  aob-network:
+    external: true
