@@ -1,0 +1,499 @@
+{
+  "name": "RAG Chat - Query Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gateway_router:8001/classify",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: $json.body.prompt, chat_history: [] }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "classify-intent",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://embedding_service:8002/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $('Webhook').item.json.body.prompt }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "embed-query",
+      "name": "Embed Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, query_text, response_text, 1 - (query_embedding <=> $1::vector) AS similarity FROM semantic_cache WHERE expires_at > NOW() ORDER BY query_embedding <=> $1::vector LIMIT 1",
+        "options": {
+          "queryParams": "={{ JSON.stringify($('Embed Query').item.json.data.embedding) }}"
+        }
+      },
+      "id": "check-cache",
+      "name": "Check Semantic Cache",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [660, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "RAG Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cache-hit-check",
+              "leftValue": "={{ $json.similarity }}",
+              "rightValue": 0.92,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "cache-hit-check",
+      "name": "Cache Hit?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cached-response",
+              "name": "response",
+              "value": "={{ $json.response_text }}",
+              "type": "string"
+            },
+            {
+              "id": "cached-flag",
+              "name": "cached",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "id": "use-cached",
+      "name": "Use Cached Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, 160]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE id = $1",
+        "options": {
+          "queryParams": "={{ $('Check Semantic Cache').item.json.id }}"
+        }
+      },
+      "id": "increment-cache-hit",
+      "name": "Increment Cache Hit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1320, 160],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "RAG Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Classify Intent').item.json.data.intent }}",
+                    "rightValue": "product_pricing",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputIndex": 0
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Classify Intent').item.json.data.intent }}",
+                    "rightValue": "general_doc",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputIndex": 1
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "switch-intent",
+      "name": "Switch Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1100, 440]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://pricing_api:8004/pricing",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "modules",
+              "value": "=starter,professional,enterprise"
+            },
+            {
+              "name": "user_count",
+              "value": "=1"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "fetch-pricing",
+      "name": "Fetch Pricing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 380]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-pricing-data",
+              "name": "pricing_data",
+              "value": "={{ JSON.stringify($json.data) }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "set-pricing",
+      "name": "Set Pricing Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1540, 380]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "no-pricing",
+              "name": "pricing_data",
+              "value": "null",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "no-pricing",
+      "name": "No Pricing (Doc Query)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1320, 540]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT content, metadata, 1 - (embedding <=> $1::vector) AS similarity FROM document_chunks ORDER BY embedding <=> $1::vector LIMIT 5",
+        "options": {
+          "queryParams": "={{ JSON.stringify($('Embed Query').item.json.data.embedding) }}"
+        }
+      },
+      "id": "rag-search",
+      "name": "RAG Search",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1760, 440],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "RAG Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, message FROM chat_sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
+        "options": {
+          "queryParams": "={{ $('Webhook').item.json.body.userID || '' }}"
+        }
+      },
+      "id": "fetch-history",
+      "name": "Fetch Chat History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1980, 440],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "RAG Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Assemble the full LLM payload\nconst webhook = $('Webhook').item.json.body;\nconst ragResults = $('RAG Search').all();\nconst historyResults = $('Fetch Chat History').all();\nconst pricingRaw = $('Set Pricing Data').item?.json?.pricing_data || $('No Pricing (Doc Query)').item?.json?.pricing_data;\n\n// Build retrieved context\nconst retrieved_context = ragResults.map(r => ({\n  content: r.json.content,\n  metadata: typeof r.json.metadata === 'string' ? JSON.parse(r.json.metadata) : r.json.metadata,\n  similarity: r.json.similarity\n}));\n\n// Build chat history (reverse to chronological order)\nconst chat_history = historyResults\n  .map(h => ({ role: h.json.role, content: h.json.message }))\n  .reverse();\n\n// Parse pricing data\nlet pricing_data = null;\ntry {\n  if (pricingRaw && pricingRaw !== 'null') {\n    pricing_data = typeof pricingRaw === 'string' ? JSON.parse(pricingRaw) : pricingRaw;\n  }\n} catch (e) {\n  pricing_data = null;\n}\n\n// System prompt\nconst system_prompt = `You are a knowledgeable and friendly Sales Engineer for our software platform. Your role is to help potential customers understand which modules and subscription plans best fit their specific business needs.\n\n## Your Behavior\n1. Listen carefully to what the user describes about their business, team size, and requirements.\n2. Recommend modules that specifically solve the problems they described. Always explain WHY each module fits their needs.\n3. Provide accurate pricing using ONLY the pricing data given to you in the context. Never estimate, calculate, or invent any prices.\n4. Be conversational — respond naturally, as a human sales engineer would.\n5. Ask clarifying questions when requirements are vague.\n\n## Hard Constraints\n- ONLY use pricing numbers that appear in the provided pricing context. If no pricing data is provided, say: \"I'd be happy to get you exact pricing — could you tell me which modules interest you?\"\n- NEVER perform arithmetic on prices. If the context says the total is $375.00, say \"$375.00\".\n- If a user's need doesn't match any module in your context, say so honestly.\n- If pricing requires a custom quote, say: \"For enterprise-level pricing, our sales team can put together a custom quote.\"\n- NEVER make up features, modules, or capabilities not in your context.\n- Do NOT reveal you are an AI or discuss your internal architecture.`;\n\nreturn {\n  json: {\n    user_prompt: webhook.prompt,\n    system_prompt: system_prompt,\n    chat_history: chat_history,\n    retrieved_context: retrieved_context,\n    pricing_data: pricing_data\n  }\n};"
+      },
+      "id": "assemble-payload",
+      "name": "Assemble LLM Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://llm_service:8003/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "call-llm",
+      "name": "Call LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 440]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "llm-response",
+              "name": "response",
+              "value": "={{ $json.data.response }}",
+              "type": "string"
+            },
+            {
+              "id": "cached-false",
+              "name": "cached",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "id": "set-llm-response",
+      "name": "Set LLM Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2640, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Save user message and assistant response to chat_sessions\nconst webhook = $('Webhook').item.json.body;\nconst userID = webhook.userID || null;\nconst userMsg = webhook.prompt;\n\n// Get response from either cache path or LLM path\nlet assistantMsg;\ntry {\n  assistantMsg = $('Set LLM Response').item.json.response;\n} catch (e) {\n  assistantMsg = $('Use Cached Response').item.json.response;\n}\n\nreturn {\n  json: {\n    userID: userID,\n    userMessage: userMsg,\n    assistantMessage: assistantMsg,\n    response: assistantMsg\n  }\n};"
+      },
+      "id": "prepare-save",
+      "name": "Prepare Save Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO chat_sessions (user_id, role, message) VALUES ($1, 'user', $2), ($1, 'assistant', $3)",
+        "options": {
+          "queryParams": "={{ $json.userID }},={{ $json.userMessage }},={{ $json.assistantMessage }}"
+        }
+      },
+      "id": "save-chat",
+      "name": "Save Chat History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3080, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "RAG Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "final-response",
+              "name": "response",
+              "value": "={{ $('Prepare Save Data').item.json.response }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "final-response",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [3300, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Classify Intent", "type": "main", "index": 0 }]
+      ]
+    },
+    "Classify Intent": {
+      "main": [
+        [{ "node": "Embed Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Embed Query": {
+      "main": [
+        [{ "node": "Check Semantic Cache", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Semantic Cache": {
+      "main": [
+        [{ "node": "Cache Hit?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Cache Hit?": {
+      "main": [
+        [{ "node": "Use Cached Response", "type": "main", "index": 0 }],
+        [{ "node": "Switch Intent", "type": "main", "index": 0 }]
+      ]
+    },
+    "Use Cached Response": {
+      "main": [
+        [{ "node": "Increment Cache Hit", "type": "main", "index": 0 }]
+      ]
+    },
+    "Increment Cache Hit": {
+      "main": [
+        [{ "node": "Prepare Save Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Switch Intent": {
+      "main": [
+        [{ "node": "Fetch Pricing", "type": "main", "index": 0 }],
+        [{ "node": "No Pricing (Doc Query)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Pricing": {
+      "main": [
+        [{ "node": "Set Pricing Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set Pricing Data": {
+      "main": [
+        [{ "node": "RAG Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "No Pricing (Doc Query)": {
+      "main": [
+        [{ "node": "RAG Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "RAG Search": {
+      "main": [
+        [{ "node": "Fetch Chat History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Chat History": {
+      "main": [
+        [{ "node": "Assemble LLM Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Assemble LLM Payload": {
+      "main": [
+        [{ "node": "Call LLM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call LLM": {
+      "main": [
+        [{ "node": "Set LLM Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set LLM Response": {
+      "main": [
+        [{ "node": "Prepare Save Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Save Data": {
+      "main": [
+        [{ "node": "Save Chat History", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Chat History": {
+      "main": [
+        [{ "node": "Final Response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "RAG Chat"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "name": "RAG Chat - Ingestion Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{}]
+        }
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://embedding_service:8002/embed-batch",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ texts: $json.chunks }) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "embed-chunks",
+      "name": "Embed Chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read module documents and split into chunks\n// In production, this would read from a file system or API.\n// For now, we accept documents via the ingestion API.\n\nconst inputDocs = $input.all();\nconst chunks = [];\nconst CHUNK_SIZE = 500; // characters\nconst CHUNK_OVERLAP = 100; // characters\n\nfor (const doc of inputDocs) {\n  const content = doc.json.content || '';\n  const metadata = doc.json.metadata || {};\n  \n  if (content.length <= CHUNK_SIZE) {\n    chunks.push({\n      content: content,\n      metadata: metadata\n    });\n  } else {\n    // Split into overlapping chunks\n    let start = 0;\n    let chunkIndex = 0;\n    while (start < content.length) {\n      const end = Math.min(start + CHUNK_SIZE, content.length);\n      const chunkContent = content.substring(start, end);\n      \n      chunks.push({\n        content: chunkContent,\n        metadata: { ...metadata, chunk_index: chunkIndex }\n      });\n      \n      start += CHUNK_SIZE - CHUNK_OVERLAP;\n      chunkIndex++;\n    }\n  }\n}\n\nreturn {\n  json: {\n    chunks: chunks.map(c => c.content),\n    metadata: chunks.map(c => c.metadata),\n    total_chunks: chunks.length\n  }\n};"
+      },
+      "id": "chunk-documents",
+      "name": "Chunk Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare INSERT statements for each chunk + embedding pair\nconst embedResponse = $('Embed Chunks').item.json.data;\nconst chunkData = $('Chunk Documents').item.json;\n\nconst items = [];\nfor (let i = 0; i < embedResponse.embeddings.length; i++) {\n  items.push({\n    json: {\n      content: chunkData.chunks[i],\n      metadata: JSON.stringify(chunkData.metadata[i]),\n      embedding: JSON.stringify(embedResponse.embeddings[i])\n    }\n  });\n}\n\nreturn items;"
+      },
+      "id": "prepare-upsert",
+      "name": "Prepare Upsert Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO document_chunks (content, metadata, embedding) VALUES ($1, $2::jsonb, $3::vector) ON CONFLICT DO NOTHING",
+        "options": {
+          "queryParams": "={{ $json.content }},={{ $json.metadata }},={{ $json.embedding }}"
+        }
+      },
+      "id": "upsert-chunks",
+      "name": "Upsert to pgvector",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1100, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "RAG Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "result",
+              "name": "status",
+              "value": "Ingestion complete",
+              "type": "string"
+            },
+            {
+              "id": "count",
+              "name": "chunks_processed",
+              "value": "={{ $('Chunk Documents').item.json.total_chunks }}",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "id": "result",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1320, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Chunk Documents", "type": "main", "index": 0 }]
+      ]
+    },
+    "Chunk Documents": {
+      "main": [
+        [{ "node": "Embed Chunks", "type": "main", "index": 0 }]
+      ]
+    },
+    "Embed Chunks": {
+      "main": [
+        [{ "node": "Prepare Upsert Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Upsert Data": {
+      "main": [
+        [{ "node": "Upsert to pgvector", "type": "main", "index": 0 }]
+      ]
+    },
+    "Upsert to pgvector": {
+      "main": [
+        [{ "node": "Result", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "RAG Chat"
+    }
+  ]
+}
