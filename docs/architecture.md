@@ -1,5 +1,10 @@
 # Architecture — RAG Sales Chatbot
 
+If you are new to the project, read these first:
+- [README.md](README.md)
+- [START_HERE.md](START_HERE.md)
+- [FLOW_WALKTHROUGH.md](FLOW_WALKTHROUGH.md)
+
 ## Overview
 
 This system is a **Retrieval-Augmented Generation (RAG)** chatbot that acts as an **AI Sales Engineer**. It analyzes user requirements, recommends software modules, and provides accurate pricing — all through a conversational interface.
@@ -78,8 +83,8 @@ This system is a **Retrieval-Augmented Generation (RAG)** chatbot that acts as a
 │  └─────────────────────────────────────────────────────┘     │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────┐     │
-│  │              Ollama (:11434)                          │     │
-│  │              LLM: qwen2.5:7b                         │     │
+│  │              Ollama (:11434, host machine)            │     │
+│  │              LLM: mistral:latest                      │     │
 │  │              Embeddings: nomic-embed-text             │     │
 │  └─────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────┘
@@ -145,7 +150,7 @@ This system is a **Retrieval-Augmented Generation (RAG)** chatbot that acts as a
 | Component          | Technology                  | License      | Purpose                              |
 |--------------------|-----------------------------|--------------|--------------------------------------|
 | Orchestration      | n8n (self-hosted)           | Fair-Code    | Workflow orchestration only          |
-| LLM                | Qwen 2.5 7B via Ollama     | Apache 2.0   | Response generation                  |
+| LLM                | Mistral via Ollama         | Apache 2.0   | Response generation                  |
 | Embeddings         | nomic-embed-text via Ollama | Apache 2.0   | Text → vector conversion             |
 | Vector Database    | PostgreSQL + pgvector       | PostgreSQL   | Vectors, cache, sessions, pricing    |
 | Microservices      | Python FastAPI              | MIT          | All compute services                 |
@@ -167,6 +172,8 @@ This system is a **Retrieval-Augmented Generation (RAG)** chatbot that acts as a
 | Ollama             | 11434         | 11434         |
 
 > Only `chat_api` (8000) is exposed to the integration team. All other services are internal to the Docker network.
+>
+> Runtime note: Ollama runs on the host machine and n8n runs as an existing container on `aob-network`.
 
 ---
 

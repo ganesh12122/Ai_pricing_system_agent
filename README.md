@@ -131,6 +131,10 @@ See [docs/api-contracts.md](docs/api-contracts.md) for all service APIs.
 
 ## Documentation
 
+- [Docs Hub](docs/README.md) — Navigation index for all project documentation
+- [Start Here](docs/START_HERE.md) — Non-technical overview of goals and system behavior
+- [Flow Walkthrough](docs/FLOW_WALKTHROUGH.md) — Step-by-step request lifecycle
+- [Runbook](docs/RUNBOOK.md) — Operations and troubleshooting guide
 - [Architecture](docs/architecture.md) — System design, data flow, scaling path
 - [API Contracts](docs/api-contracts.md) — Request/response specs for all services
 - [System Prompt](docs/system-prompt.md) — AI Sales Engineer persona & constraints

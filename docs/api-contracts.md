@@ -1,5 +1,9 @@
 # API Contracts — RAG Sales Chatbot
 
+For non-technical readers, start with:
+- [START_HERE.md](START_HERE.md)
+- [FLOW_WALKTHROUGH.md](FLOW_WALKTHROUGH.md)
+
 All internal services communicate via HTTP REST. This document defines the exact request/response contracts for each service.
 
 ---
@@ -218,7 +222,7 @@ Embed multiple texts (for ingestion).
 ```json
 {
   "response": "Based on your needs as a small business with 15 employees, I'd recommend our Professional Plan at $25.00 per user per month, totaling $375.00/month. Here's why this plan fits your needs...",
-  "model": "qwen2.5:7b",
+  "model": "mistral:latest",
   "tokens_used": {
     "prompt": 850,
     "completion": 245,
@@ -235,7 +239,7 @@ Embed multiple texts (for ingestion).
   "status": "healthy",
   "service": "llm_service",
   "backend": "ollama",
-  "model": "qwen2.5:7b"
+  "model": "mistral:latest"
 }
 ```
 
