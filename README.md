@@ -17,7 +17,8 @@ See [docs/architecture.md](docs/architecture.md) for full architecture diagrams.
 ### Prerequisites
 
 - Docker & Docker Compose
-- NVIDIA GPU + drivers (for Ollama)
+- Local Ollama installation (host machine)
+- Existing n8n container connected to `aob-network`
 - Git
 
 ### 1. Clone & Configure
@@ -29,19 +30,21 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
-### 2. Start All Services
+### 2. Start Backend Services
 
 ```bash
 docker compose up -d
 ```
 
-This starts: PostgreSQL (pgvector), Ollama, n8n, chat_api, gateway_router, embedding_service, llm_service, pricing_api.
+This starts: PostgreSQL (pgvector), chat_api, gateway_router, embedding_service, llm_service, pricing_api.
 
-### 3. Pull Ollama Models
+Ollama runs on host (outside compose), and n8n is your existing container on `aob-network`.
+
+### 3. Pull Ollama Models (Host)
 
 ```bash
-docker exec rag_ollama ollama pull qwen2.5:7b
-docker exec rag_ollama ollama pull nomic-embed-text
+ollama pull mistral:latest
+ollama pull nomic-embed-text
 ```
 
 ### 4. Test
@@ -64,10 +67,15 @@ RAG_CHATBOT/
 │   └── reviced_plan_from_teammate.md   # Teammate's workflow plan
 ├── services/
 │   ├── chat_api/                 # Public gateway — POST /chat
+│   │   └── docs/README.md        # Service-level documentation
 │   ├── gateway_router/           # Intent classification (keyword-based)
+│   │   └── docs/README.md        # Service-level documentation
 │   ├── embedding_service/        # Text → vector (nomic-embed-text)
+│   │   └── docs/README.md        # Service-level documentation
 │   ├── llm_service/              # LLM inference (Ollama/vLLM/OpenAI)
+│   │   └── docs/README.md        # Service-level documentation
 │   └── pricing_api/              # Exact pricing from database
+│       └── docs/README.md        # Service-level documentation
 ├── n8n/
 │   └── workflows/                # Exported n8n workflow JSONs
 ├── db/
@@ -87,9 +95,9 @@ RAG_CHATBOT/
 | embedding_service | 8002 | Text embedding via Ollama                     |
 | llm_service       | 8003 | LLM response generation                      |
 | pricing_api       | 8004 | Exact pricing calculation from DB             |
-| n8n               | 5678 | Workflow orchestration                        |
+| n8n               | 5678 | Workflow orchestration (existing container)   |
 | PostgreSQL        | 5432 | Database (pgvector, cache, sessions, pricing) |
-| Ollama            | 11434| LLM & embedding model server                 |
+| Ollama            | 11434| LLM & embedding model server (host machine)  |
 
 ## API
 
@@ -115,7 +123,7 @@ See [docs/api-contracts.md](docs/api-contracts.md) for all service APIs.
 | Component     | Technology              | License    |
 |---------------|-------------------------|------------|
 | Orchestration | n8n                     | Fair-Code  |
-| LLM           | Qwen 2.5 7B (Ollama)   | Apache 2.0 |
+| LLM           | Mistral (Ollama)       | Apache 2.0 |
 | Embeddings    | nomic-embed-text        | Apache 2.0 |
 | Vector DB     | PostgreSQL + pgvector   | PostgreSQL |
 | Services      | Python FastAPI          | MIT        |
@@ -126,3 +134,11 @@ See [docs/api-contracts.md](docs/api-contracts.md) for all service APIs.
 - [Architecture](docs/architecture.md) — System design, data flow, scaling path
 - [API Contracts](docs/api-contracts.md) — Request/response specs for all services
 - [System Prompt](docs/system-prompt.md) — AI Sales Engineer persona & constraints
+
+## Service Documentation
+
+- [chat_api docs](services/chat_api/docs/README.md)
+- [gateway_router docs](services/gateway_router/docs/README.md)
+- [embedding_service docs](services/embedding_service/docs/README.md)
+- [llm_service docs](services/llm_service/docs/README.md)
+- [pricing_api docs](services/pricing_api/docs/README.md)
